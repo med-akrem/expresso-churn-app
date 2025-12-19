@@ -14,7 +14,7 @@ import numpy as np
 @st.cache_resource
 def load_model_and_encoders():
     try:
-        model = joblib.load('expresso_churn_model.pkl')
+        model = joblib.load('expresso_churn_model (1).pkl')
         label_encoders = joblib.load('label_encoders.pkl')
         # Les colonnes utilisées par le modèle
         feature_names = [

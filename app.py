@@ -1,0 +1,107 @@
+# app.py
+import streamlit as st
+import pandas as pd
+import joblib
+import numpy as np
+
+# ---------------------------
+# CHARGEMENT DES FICHIERS
+# ---------------------------
+@st.cache_resource
+def load_model_and_data():
+    try:
+        model = joblib.load('expresso_churn_model (1).pkl')
+        label_encoders = joblib.load('label_encoders.pkl')
+        feature_names = [
+            'REGION', 'TENURE', 'MONTANT', 'FREQUENCE_RECH', 'REVENUE',
+            'ARPU_SEGMENT', 'FREQUENCE', 'DATA_VOLUME', 'ON_NET', 'ORANGE',
+            'TIGO', 'ZONE1', 'ZONE2', 'MRG', 'REGULARITY', 'TOP_PACK', 'FREQ_TOP_PACK'
+        ]
+        return model, label_encoders, feature_names
+    except FileNotFoundError as e:
+        st.error(f"❌ Fichier manquant : {e}")
+        st.stop()
+
+model, label_encoders, FEATURE_NAMES = load_model_and_data()
+CAT_COLS = ['REGION', 'TENURE', 'MRG', 'TOP_PACK']
+
+# ---------------------------
+# INTERFACE STREAMLIT
+# ---------------------------
+st.set_page_config(page_title="Expresso Churn Predictor", page_icon="📞")
+st.title("📞 Prédiction de désabonnement - Expresso")
+st.markdown("Remplissez les caractéristiques du client pour prédire son risque de désabonnement.")
+
+# ---------------------------
+# SAISIE DES DONNÉES
+# ---------------------------
+input_data = {}
+
+# Valeurs connues du dataset Expresso
+TENURE_OPTIONS = ['3-6', '6-9', '9-12', '12-15', '15-18', '18-21', '21-24', '>24']
+MRG_OPTIONS = ['NO', 'YES']
+
+for col in FEATURE_NAMES:
+    if col == 'TENURE':
+        val = st.selectbox("Durée d'abonnement (TENURE)", options=TENURE_OPTIONS)
+        input_data[col] = val
+    elif col == 'MRG':
+        val = st.selectbox("Fusion avec un autre opérateur ? (MRG)", options=MRG_OPTIONS)
+        input_data[col] = val
+    elif col in ['REGION', 'TOP_PACK']:
+        classes = sorted(label_encoders[col].classes_.tolist())
+        val = st.selectbox(f"{col}", options=classes)
+        input_data[col] = val
+    else:
+        input_data[col] = st.number_input(
+            f"{col}",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            format="%.2f"
+        )
+
+# ---------------------------
+# PRÉDICTION
+# ---------------------------
+if st.button("🔍 Prédire le risque de churn"):
+    try:
+        # Créer le DataFrame
+        df_input = pd.DataFrame([input_data])
+
+        # Encoder les variables catégorielles en gérant les "unseen labels"
+        for col in CAT_COLS:
+            original_val = str(df_input[col].iloc[0])
+            le = label_encoders[col]
+            
+            if original_val in le.classes_:
+                encoded_val = le.transform([original_val])[0]
+            else:
+                # ⚠️ Valeur non vue pendant l'entraînement → on utilise la valeur la plus fréquente (classe 0)
+                # OU on pourrait lever une erreur, mais ici on continue prudemment
+                st.warning(f"⚠️ Valeur '{original_val}' pour '{col}' non vue pendant l'entraînement. "
+                           f"Utilisation de la catégorie la plus courante.")
+                encoded_val = 0  # classe 0 = première catégorie apprise
+            
+            df_input[col] = encoded_val
+
+        # S'assurer de l'ordre et convertir en float
+        df_input = df_input[FEATURE_NAMES].astype(float)
+
+        # Prédire
+        prediction = model.predict(df_input)[0]
+        proba = model.predict_proba(df_input)[0]
+
+        # Affichage
+        st.subheader("Résultat de la prédiction")
+        if prediction == 1:
+            st.error("🔴 **Risque élevé de désabonnement !**")
+        else:
+            st.success("🟢 **Client fidèle (faible risque).**")
+
+        st.metric("Probabilité de désabonnement", f"{proba[1]:.2%}")
+        st.metric("Confiance (classe fidèle)", f"{proba[0]:.2%}")
+
+    except Exception as e:
+        st.error(f"❌ Erreur lors de la prédiction : {e}")
+        st.write("Veuillez vérifier que tous les fichiers sont présents et que le modèle a été entraîné correctement.")
